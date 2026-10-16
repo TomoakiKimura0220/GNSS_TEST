@@ -1,0 +1,9 @@
+[project]
+name = "gnss-maps"
+version = "0.1.0"
+description = "NMEA logs to Google My Maps KML"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false
