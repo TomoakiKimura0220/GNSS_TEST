@@ -105,7 +105,7 @@ PCの日付から測定日を推測しません。
 | `points.csv` | 変換後の座標、UTC時刻、測位状態、区間番号 |
 | `summary.json` | 採用件数、除外件数、区間数、最後の有効位置のGoogleマップURL |
 
-CSVの時刻はUTCの `hhmmss.ss` です。
+`points.csv` の時刻はUTCの `hhmmss.ss` です。
 日本時間はUTCに9時間を加えます。
 `points.csv` は従来どおりUTC時刻のみです。
 `time_points.csv` には、同じUTC時刻の有効なRMCに日付があれば、日本時間とUTCの日時を出力します。
@@ -114,7 +114,8 @@ CSVを表計算ソフトで開くと、時刻の先頭の0が省略されるこ�
 ## データ形式と変換
 
 **NMEA 0183**は、受信機が測位結果を伝える形式です。
-このプログラムはGNGGAとGPGGAを読み、RMCなどのほかの行は読み飛ばします。
+位置の抽出にはGNGGAとGPGGAを使い、日付の取得にはGNRMCとGPRMCを使います。
+それ以外の種類の行は読み飛ばします。
 
 ```text
 $GNGGA,064618.20,3500.00000,N,13900.00000,E,1,09,1.40,163.9,M,36.0,M,,*44
@@ -167,15 +168,86 @@ GGAに有効と記載されている点でも、実際の位置に誤差があ�
 異常な位置の飛びを自動除去する処理は含めていません。
 区間内の線は測定点を直線で結び、点の間の実際の移動経路は補間しません。
 
-## プロジェクト構成と確認
+## ファイル構造と役割
 
-- `gnss_maps/nmea.py`：NMEAの検査と座標変換。
-- `gnss_maps/__main__.py`：ログ読み取り、区間分割、KMLなどの出力。
-- `gnss_maps/timed.py`：RMCの日付確認、日本時間への変換、時刻付き地点の出力。
-- `tests/test_timed.py`：日本時間の日付繰り上がり、日付欠落、破損データ、時刻別の間引きの確認。
-- `tests/test_track.py`：符号、無効な位置、チェックサム、日付境界、区間分割、KML座標順の確認。
-- `pyproject.toml`：Pythonバージョンとプロジェクト設定。
-- `uv.lock`：uvのロックファイル。
+以下は、ログを配置して変換した後の構成例です。
+`data/measurement.txt` は利用者が用意する入力例、`result/` と `.venv/` は実行時に作られるフォルダーです。
+実測ログと変換結果はGitHubには含まれていません。
+ZIPで取得した場合、最上位フォルダー名は `GNSS_TEST-main` などになることがあります。
+
+```text
+GNSS_TEST/
+├── README.md                  # 導入、実行、地図表示、データ形式の説明
+├── pyproject.toml             # プロジェクト名、対応Python、依存関係、uv設定
+├── uv.lock                    # uvが管理する依存関係の確定情報
+├── .python-version            # uvで選択するPythonのバージョン（3.12）
+├── .gitignore                 # Gitで管理しないファイルの指定
+├── gnss_maps/                 # プログラム本体
+│   ├── __init__.py            # Pythonパッケージとしての入口（現在は空）
+│   ├── __main__.py            # 実行の入口、引数処理、ログ集計、軌跡出力
+│   ├── nmea.py                # GGAの検査とDMM→DD変換
+│   └── timed.py               # RMCの日付取得と日時付き地点の出力
+├── tests/                     # 変換結果や境界条件を確認するテスト
+│   ├── test_track.py          # 座標変換、無効データ、区間分割、KMLの確認
+│   └── test_timed.py          # 日付変換、日付欠落、地点の間引きの確認
+├── data/                      # 入力ログを置く場所
+│   ├── .gitkeep               # 空のフォルダーをGitに残すためのファイル
+│   └── measurement.txt        # 利用者がコピーする計測ログの例（未同梱）
+├── result/                    # 既定の出力先（変換時に自動作成）
+│   ├── track.kml              # 全有効点を結んだ軌跡
+│   ├── points.csv             # 全有効点のUTC時刻、座標、測位状態
+│   ├── time_points.kml        # 指定間隔で選んだ日時付きピン
+│   ├── time_points.csv        # 日時付きピンの日時、座標、測位状態
+│   └── summary.json           # 点数、区間数、最後の位置の地図URL
+└── .venv/                     # uvが作成する仮想環境（手動編集不要）
+```
+
+`data/` の計測ログ、`result/`、`.venv/`、Pythonのキャッシュは `.gitignore` でGitの管理対象から除外しています。
+ただし、`--out` で `result/` の外に出力したファイルは、自動で除外されるとは限りません。
+フォルダーをZIPで他人に渡す場合も `.gitignore` は働かないため、含めるログと出力結果を確認してください。
+
+### ソースコードを読む順番
+
+| ファイル | 主な関数 | 読むと分かること |
+|---|---|---|
+| `gnss_maps/__main__.py` | `main()` | コマンド引数を受け取り、各処理をどの順番で実行するか |
+| `gnss_maps/nmea.py` | `parse_gga()`、`to_dd()` | NMEAの1行を検査し、緯度と経度を数値に変換する方法 |
+| `gnss_maps/__main__.py` | `read_track()`、`seconds()` | 点を集め、測位の途切れや時間差で区間を分ける方法 |
+| `gnss_maps/__main__.py` | `write_kml()`、`element()` | 各区間をKMLの線や点として保存する方法 |
+| `gnss_maps/timed.py` | `rmc_dates()`、`time_seconds()`、`label_for()` | RMCの日付を同じUTC時刻のGGAに対応付け、日本時間を表示する方法 |
+| `gnss_maps/timed.py` | `select_points()`、`write_time_points()` | 指定間隔で点を選び、日時付きKMLとCSVを保存する方法 |
+
+1点のデータは、プログラム内で `(緯度DD, 経度DD, UTC時刻の文字列, 測位状態の文字列)` の順に保持します。
+`segments` は「区間の一覧」で、各区間にはこの測定点が記録順に入っています。
+
+```text
+main()
+├── read_track() → parse_gga() → to_dd()
+├── write_kml() → track.kml
+├── 全有効点の保存 → points.csv
+├── write_time_points()
+│   ├── rmc_dates() → 日付の取得
+│   ├── select_points() → 地点の選択
+│   └── label_for() → time_points.kml / time_points.csv
+└── 集計結果の保存 → summary.json
+```
+
+### 受け取った人が最初に行うこと
+
+1. `pyproject.toml` のあるフォルダーでPowerShellを開く。
+2. `uv sync --locked` で実行環境を用意する。
+3. 自分のNMEAログを `data/` にコピーする。
+4. 次のコマンドを実行する。ファイル名は実際のログに合わせる。
+5. Googleマイマップへ `result/track.kml` と `result/time_points.kml` を別レイヤーとして読み込む。
+
+```powershell
+uv run python -m gnss_maps ".\data\measurement.txt" --out ".\result" --time-step 10
+```
+
+KMLを作るだけなら、ソースコードを編集する必要はありません。
+uvの導入手順は「Windowsで実行する」を参照してください。
+
+## テストと動作確認
 
 ```powershell
 uv run python -m unittest discover -s tests -v
