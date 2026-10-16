@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 import xml.etree.ElementTree as ET
 from .nmea import parse_gga
+from .timed import write_time_points
 
 NS = 'http://www.opengis.net/kml/2.2'
 ET.register_namespace('', NS)
@@ -98,7 +99,10 @@ def main():
     parser.add_argument('log', type=Path)
     parser.add_argument('--out', type=Path, default=Path('result'))
     parser.add_argument('--gap-seconds', type=float, default=2.0, help='この秒数を超える空白で線を分割（既定2秒）')
+    parser.add_argument('--time-step', type=float, default=10.0, help='時刻付き地点の間隔（秒）。0で全点、既定10秒')
     args = parser.parse_args()
+    if not math.isfinite(args.time_step) or args.time_step < 0:
+        parser.error('--time-stepには0以上の有限数を指定してください')
     if not math.isfinite(args.gap_seconds) or args.gap_seconds <= 0:
         parser.error('--gap-secondsには正の有限数を指定してください')
     try:
@@ -113,6 +117,7 @@ def main():
             for index, segment in enumerate(segments, 1):
                 for lat, lon, utc, quality in segment:
                     writer.writerow([index, utc, f'{lat:.8f}', f'{lon:.8f}', quality])
+        stats['time_points'] = write_time_points(args.out, segments, args.log, args.time_step)
         last = segments[-1][-1]
         stats['segments'] = len(segments)
         stats['last_valid_google_maps_url'] = 'https://www.google.com/maps/search/?' + urlencode({'api': 1, 'query': f'{last[0]:.8f},{last[1]:.8f}'})
@@ -121,6 +126,7 @@ def main():
         parser.exit(1, f'ファイルを読み書きできません: {error}\n')
     print(f"有効な位置: {stats['valid_points']}点 / 区間: {len(segments)}")
     print(f'Googleマイマップに読み込むファイル: {args.out / "track.kml"}')
+    print(f"時刻付き地点: {stats['time_points']}点 / {args.out / 'time_points.kml'}")
     print(stats['last_valid_google_maps_url'])
 
 
