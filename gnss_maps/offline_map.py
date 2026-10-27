@@ -88,3 +88,23 @@ def map_widget_class():
                 self.set_zoom(max(self.min_zoom, min(round(self.zoom), self.max_zoom)))
 
     return OfflineMap
+
+
+def tile_with_parent(db, z, x, y):
+    """Return a PNG tile, cropping a locally stored parent if detail is absent."""
+    from PIL import Image
+    for level in range(z, -1, -1):
+        factor = 1 << (z-level)
+        px, py = x//factor, y//factor
+        row = db.execute('SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?',
+                         (level, px, (1 << level)-1-py)).fetchone()
+        if row:
+            with Image.open(io.BytesIO(row[0])) as source:
+                source = source.convert('RGB')
+                w, h = source.size
+                left, top = (x % factor)*w/factor, (y % factor)*h/factor
+                tile = source.resize((256,256), Image.Resampling.BILINEAR,
+                                     box=(left,top,left+w/factor,top+h/factor))
+                output = io.BytesIO(); tile.save(output,format='PNG')
+                return output.getvalue()
+    return None

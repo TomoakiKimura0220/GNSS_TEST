@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import secrets
 import sqlite3
+import tempfile
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -152,7 +153,43 @@ class Recorder:
             self.thread.start()
             return sid
 
-    def ingest(self, line):
+    def import_log(self, payload, title):
+        """Parse in isolation so importing never changes the live receiver state."""
+        if not payload or len(payload) > 50 * 1024 * 1024:
+            raise ValueError('空ファイル、または50 MiBを超えるファイルは読み込めません')
+        sid = uuid.uuid4().hex
+        target = self.directory / (sid + '.log')
+        with tempfile.TemporaryDirectory(dir=self.directory) as staging:
+            parsed = Recorder(Path(staging))
+            parsed.active = sid
+            try:
+                for raw in io.BytesIO(payload):
+                    if len(raw) > 65536:
+                        raise ValueError('1行が長すぎます。NMEAテキストログを選んでください')
+                    parsed.ingest(raw.decode('ascii', errors='replace').strip(), commit=False)
+                parsed.db.commit()
+                count = parsed.db.execute('SELECT COUNT(*) FROM points').fetchone()[0]
+                if not count:
+                    raise ValueError('有効なGGA位置がありません。NMEAログと測位品質を確認してください')
+                staged_log = Path(staging) / 'original.log'
+                staged_log.write_bytes(payload)
+                with self.lock:
+                    try:
+                        self.db.execute('INSERT INTO sessions VALUES (?,?,?,?,?,?,?)',
+                            (sid, title.strip()[:120] or 'インポート', 'import', utc_now(), utc_now(), 'completed', ''))
+                        rows = parsed.db.execute('SELECT session,received,utc,measured,lat,lon,quality,satellites,hdop,segment FROM points ORDER BY id')
+                        self.db.executemany('INSERT INTO points (session,received,utc,measured,lat,lon,quality,satellites,hdop,segment) VALUES (?,?,?,?,?,?,?,?,?,?)', rows)
+                        staged_log.replace(target)
+                        self.db.commit()
+                    except Exception:
+                        self.db.rollback()
+                        target.unlink(missing_ok=True)
+                        raise
+                return dict(session=sid, count=count)
+            finally:
+                parsed.close()
+
+    def ingest(self, line, commit=True):
         with self.lock:
             self.last_rx = time.monotonic()
             f = fields_of(line)
@@ -172,7 +209,7 @@ class Recorder:
                         AND measured IS NULL AND id IN
                         (SELECT id FROM points WHERE session=? ORDER BY id DESC LIMIT 20)''',
                         (measured, self.active, f[1], self.active))
-                    self.db.commit()
+                    self.db.commit() if commit else None
                 except (ValueError, IndexError):
                     pass
                 return
@@ -207,7 +244,7 @@ class Recorder:
                 (session,received,utc,measured,lat,lon,quality,satellites,hdop,segment)
                 VALUES (?,?,?,?,?,?,?,?,?,?)''',
                 (self.active, utc_now(), clock, measured, lat, lon, self.quality, sats, hdop, self.segment))
-            self.db.commit()
+            self.db.commit() if commit else None
 
     def _run(self, source, connection, raw):
         status = 'completed'
@@ -339,8 +376,9 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                         raise ValueError('範囲外のタイル')
                     path=Path('data/desktop/presets')/(tile_key+'.mbtiles')
                     with sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True) as db:
-                        row=db.execute('SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?',(z,x,2**z-1-y)).fetchone()
-                    return self.send(row[0] if row else b'',status=200 if row else 404,content_type='image/png' if tile_key=='std' else 'image/jpeg')
+                        from .offline_map import tile_with_parent
+                        tile=tile_with_parent(db,z,x,y)
+                    return self.send(tile or b'',status=200 if tile else 404,content_type='image/png')
                 if u.path == '/api/raw':
                     sid=q.get('session',[''])[0]
                     with recorder.lock:
@@ -388,11 +426,28 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                 return self.send({'error':'操作を許可できません。画面を再読み込みしてください。'},403)
             try:
                 length = int(self.headers.get('Content-Length', '0'))
+                if urlparse(self.path).path == '/api/import':
+                    if not 0 < length <= 50 * 1024 * 1024:
+                        return self.send({'error':'1バイト以上、50 MiB以下のログを選んでください'},413)
+                    payload = self.rfile.read(length)
+                    if len(payload) != length:
+                        raise ValueError('ファイルの転送が途中で切れました')
+                    title = parse_qs(urlparse(self.path).query).get('name',['インポート'])[0]
+                    return self.send(recorder.import_log(payload, title))
                 if not 0 < length <= 4096:
                     raise ValueError('リクエストサイズが不正です')
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('操作データが不正です')
+                if self.path == '/api/maps/prepare':
+                    with recorder.lock:
+                        bounds = recorder.db.execute('SELECT MIN(lon),MIN(lat),MAX(lon),MAX(lat) FROM points WHERE session=?',(str(data.get('session','')),)).fetchone()
+                    if bounds[0] is None:
+                        raise ValueError('地図を準備する履歴を選んでください')
+                    from .presets import prepare
+                    west,south,east,north=bounds
+                    prepare(Path('data/desktop/presets'),(west-.006,south-.006,east+.006,north+.006))
+                    return self.send({'ok':True})
                 if self.path == '/api/start':
                     baud = int(data.get('baud',38400))
                     if baud not in (9600,19200,38400,57600,115200,230400,460800,921600):

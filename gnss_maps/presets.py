@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 import sqlite3
 import time
+import threading
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from PIL import Image
@@ -18,7 +19,19 @@ def tile_xy(lat, lon, zoom):
             max(0, min(n-1, int((1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n))))
 
 
+_prepare_lock = threading.Lock()
+
+
 def prepare(directory, bounds, progress=lambda s: None, cancel=None):
+    if not _prepare_lock.acquire(blocking=False):
+        raise ValueError('地図を取得中です。完了してから再実行してください')
+    try:
+        return _prepare(directory, bounds, progress, cancel)
+    finally:
+        _prepare_lock.release()
+
+
+def _prepare(directory, bounds, progress=lambda s: None, cancel=None):
     west, south, east, north = bounds
     if not (-180 <= west < east <= 180 and -85 < south < north < 85):
         raise ValueError('保存範囲が不正です')

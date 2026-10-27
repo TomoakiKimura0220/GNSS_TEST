@@ -17,3 +17,19 @@ class PresetTests(unittest.TestCase):
             with self.assertRaises(OSError): prepare(d,(137,35,137.0001,35.0001))
             self.assertEqual(p.read_bytes(),b'existing')
             self.assertFalse((Path(d)/'std.partial').exists())
+
+class ParentTileTests(unittest.TestCase):
+    def test_missing_detail_uses_correct_parent_quadrant(self):
+        import sqlite3, io
+        from PIL import Image
+        from gnss_maps.offline_map import tile_with_parent
+        db=sqlite3.connect(':memory:')
+        db.execute('CREATE TABLE tiles(zoom_level,tile_column,tile_row,tile_data)')
+        im=Image.new('RGB',(256,256),'red');im.paste('blue',(128,0,256,128))
+        out=io.BytesIO();im.save(out,format='PNG')
+        db.execute('INSERT INTO tiles VALUES(1,1,1,?)',(out.getvalue(),))
+        result=tile_with_parent(db,2,3,0)
+        with Image.open(io.BytesIO(result)) as tile:
+            self.assertEqual(tile.getpixel((128,128)),(0,0,255))
+        self.assertIsNone(tile_with_parent(db,2,0,3))
+        db.close()

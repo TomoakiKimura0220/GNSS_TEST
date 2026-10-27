@@ -32,7 +32,7 @@ async function loadMap(){
  L.control.scale({imperial:false}).addTo(map);
  let layers;try{layers=await api('/api/maps');}catch(e){$('mapNotice').textContent='地図を読み込めません：'+e.message;return;}const choices={};
  for(const layer of layers){const tile=L.tileLayer(`/tiles/${layer.id}/{z}/{x}/{y}`,{minZoom:layer.minzoom,maxNativeZoom:layer.maxzoom,maxZoom:22,attribution:layer.attribution});choices[layer.title]=tile;}
- if(layers.length){const b=layers[0].bounds?.split(',').map(Number);if(b?.length===4&&b.every(Number.isFinite))map.fitBounds([[b[1],b[0]],[b[3],b[2]]]);Object.values(choices)[0].addTo(map);L.control.layers(choices,{}, {collapsed:false}).addTo(map);$('mapNotice').textContent='保存済み地図を使用（オフライン）。保存範囲外は背景が表示されません。高倍率は画像の拡大表示です。';}
+ if(layers.length){const b=layers[0].bounds?.split(',').map(Number);if(b?.length===4&&b.every(Number.isFinite))map.fitBounds([[b[1],b[0]],[b[3],b[2]]]);Object.values(choices)[0].addTo(map);L.control.layers(choices,{}, {collapsed:false}).addTo(map);$('mapNotice').textContent='保存済み地図を使用（オフライン）。詳細画像がない場所は保存済みの粗い画像で補います。保存範囲外は「全経路の地図を準備」で追加してください。';}
  else $('mapNotice').textContent='保存済み地図がありません。背景なしで経路を表示します。';
  map.on('dragstart',()=>{$('follow').checked=false;});
 }
@@ -57,7 +57,7 @@ function scheduleRaw(){clearTimeout(rawTimer);if($('rawPause').checked)return;co
 async function loadRaw(version){if(!selected){$('rawText').textContent='計測を開始するか履歴を選択してください。';return;}const sid=selected,p=points[cursor],live=sid===state.active&&state.running&&$('follow').checked;try{const rows=await api('/api/raw?'+new URLSearchParams({session:sid,...(!live&&p?{utc:p.utc}:{})}));if(version!==rawGeneration||activeView!=='raw'||$('rawPause').checked)return;const kind=$('rawFilter').value;const filtered=rows.filter(r=>kind==='all'||kind==='error'&&!r.valid||r.text.slice(3,6)===kind);$('rawText').textContent=filtered.map(r=>`${r.number.toString().padStart(6)}  ${r.text}`).join('\n');$('rawInfo').textContent=`${live?'受信ログ末尾':'選択点まで'}の最大1,000行／表示 ${filtered.length}行。左端は元ログ行番号。同じUTCが複数日ある場合は最初の一致です。`;}catch(e){if(version===rawGeneration)$('rawInfo').textContent=e.message;}}
 $('seriesField').onchange=drawSeries;$('rawFilter').onchange=scheduleRaw;$('rawPause').onchange=()=>{rawGeneration++;if(!$('rawPause').checked)scheduleRaw();};
 async function ports(){const entries=await api('/api/ports');const old=$('source').value;$('source').replaceChildren();for(const e of [{device:'demo',description:'デモ（架空の位置）'},...(config.replay?[{device:'replay',description:'指定したログを再生'}]:[]),...entries]){const option=document.createElement('option');option.value=e.device;option.textContent=e.device==='demo'||e.device==='replay'?e.description:`${e.device} · ${e.description}`;$('source').append(option);}if([...$('source').options].some(o=>o.value===old))$('source').value=old;}
-async function history(){const sessions=await api('/api/sessions');$('sessions').replaceChildren();for(const s of sessions){const button=document.createElement('button');button.className='session'+(s.id===selected?' active':'');button.textContent=s.title+(s.source==='demo'?' [デモ]':s.source==='replay'?' [ログ再生]':'');const detail=document.createElement('small');detail.textContent=`${dateFmt.format(new Date(s.started))} · ${s.point_count}点 · FIX ${s.fix_count}点 · ${s.status}`;button.append(detail);button.onclick=()=>select(s.id,s.title).catch(e=>error(e.message));$('sessions').append(button);}}
+async function history(){const sessions=await api('/api/sessions');$('sessions').replaceChildren();for(const s of sessions){const button=document.createElement('button');button.className='session'+(s.id===selected?' active':'');button.textContent=s.title+(s.source==='demo'?' [デモ]':s.source==='replay'?' [ログ再生]':s.source==='import'?' [インポート]':'');const detail=document.createElement('small');detail.textContent=`${dateFmt.format(new Date(s.started))} · ${s.point_count}点 · FIX ${s.fix_count}点 · ${s.status}`;button.append(detail);button.onclick=()=>select(s.id,s.title).catch(e=>error(e.message));$('sessions').append(button);}}
 async function select(sid,title){generation++;selected=sid;currentTitle=title;points=[];cursor=0;stopPlay();$('follow').checked=sid===state.active&&state.running;for(const kind of ['csv','kml','log']){$(kind).href=`/api/export?session=${sid}&kind=${kind}`;$(kind).download=`${sid}.${kind}`;}draw();await fetchPoints();cursor=Math.max(0,points.length-1);draw();fit();await history();}
 async function fetchPoints(){
  if(!selected||fetchingGeneration===generation)return;
@@ -84,3 +84,26 @@ $('play').onclick=()=>{if(playing){stopPlay();return;}if(!points.length)return;$
 async function tick(){try{state=await api('/api/state');$('start').disabled=state.running;$('stop').disabled=!state.running;$('source').disabled=state.running;$('baud').disabled=state.running;
  $('status').textContent=!state.running?'計測停止 · 履歴を確認できます':state.fresh?`受信中 · ${labels[state.quality]}`:state.rx_age===null||state.rx_age>3?'受信待ち／受信停止':'受信中 · 有効な現在位置なし';if(state.error)error(state.error);await fetchPoints();}catch(e){$('status').textContent='サーバーへの接続が切れました';error(e.message);state.running=false;state.fresh=false;draw();}finally{setTimeout(tick,1000);}}
 (async()=>{try{config=await api('/api/config');await ports();await history();await loadMap();draw();tick();}catch(e){error(e.message);}})();
+
+$('importLog').onclick=async()=>{
+ const file=$('importFile').files[0];
+ if(!file){$('importStatus').textContent='ログファイルを選んでください。';return;}
+ if(!file.size||file.size>50*1024*1024){$('importStatus').textContent='1バイト以上、50 MiB以下のログを選んでください。';return;}
+ $('importLog').disabled=true;$('importFile').disabled=true;
+ $('importStatus').textContent='読み込み中です。受信・記録は継続しています。';
+ try{
+  const response=await fetch('/api/import?'+new URLSearchParams({name:file.name}),{method:'POST',headers:{'X-GNSS-Token':config.token,'Content-Type':'application/octet-stream'},body:file});
+  const result=await response.json();if(!response.ok)throw Error(result.error||'読み込みに失敗しました');
+  await select(result.session,file.name);
+  $('importStatus').textContent=`読み込み完了：${result.count.toLocaleString()}点。履歴から再表示できます。`;
+ }catch(e){$('importStatus').textContent=e.message;}
+ finally{$('importLog').disabled=false;$('importFile').disabled=false;}
+};
+
+$('prepareMap').onclick=async()=>{
+ if(!selected){error('先に履歴を選んでください。');return;}
+ $('prepareMap').disabled=true;$('mapNotice').textContent='経路全体と周囲の地図を国土地理院から取得中です。';
+ try{await api('/api/maps/prepare',{session:selected});map.eachLayer(layer=>{if(layer instanceof L.TileLayer)layer.redraw();});$('mapNotice').textContent='地図の準備が完了しました。保存した範囲はオフラインでも表示できます。';error('');}
+ catch(e){error(e.message);$('mapNotice').textContent='地図の取得に失敗しました。保存済み画像で表示を続けます。';}
+ finally{$('prepareMap').disabled=false;}
+};

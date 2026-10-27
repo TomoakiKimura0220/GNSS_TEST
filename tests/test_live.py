@@ -101,6 +101,25 @@ class LiveTests(unittest.TestCase):
         self.assertFalse(self.rec.state()['fresh'])
         self.assertEqual((Path(self.temp.name)/f'{sid}.log').read_bytes(),gga().encode())
 
+    def test_import_preserves_original_and_live_state(self):
+        self.rec.ingest(gga())
+        before=self.rec.state()
+        payload=(rmc()+gga()+"broken\n"+gga('120000.20')).encode()
+        result=self.rec.import_log(payload,'sample.log')
+        self.assertEqual(result['count'],2)
+        self.assertEqual((Path(self.temp.name)/(result['session']+'.log')).read_bytes(),payload)
+        self.assertEqual(self.rec.state()['active'],before['active'])
+        self.assertEqual(self.rec.state()['quality'],before['quality'])
+        self.assertEqual(len(self.rec.points('test')),1)
+        self.assertTrue(self.rec.points(result['session'])[0]['measured'])
+
+    def test_invalid_import_leaves_no_session(self):
+        for payload in [b'',b'not nmea',b'x'*65537]:
+            with self.assertRaises(ValueError):
+                self.rec.import_log(payload,'bad.log')
+        self.assertEqual(len(self.rec.sessions()),1)
+        self.assertEqual(len(list(Path(self.temp.name).glob('*.log'))),1)
+
     def test_http_endpoints_and_token(self):
         server=make_server(self.rec,0)
         thread=threading.Thread(target=server.serve_forever,daemon=True)
@@ -129,6 +148,15 @@ class LiveTests(unittest.TestCase):
             headers={'Content-Type':'application/json','X-GNSS-Token':config['token']}
             with urlopen(Request(base+'/api/start',data=body,headers=headers)) as response:
                 sid=json.load(response)['session']
+            payload=(rmc()+gga()).encode()
+            with urlopen(Request(base+'/api/import?name=sample.log',data=payload,headers={'X-GNSS-Token':config['token'],'Content-Type':'application/octet-stream'})) as response:
+                imported=json.load(response)
+                self.assertEqual(imported['count'],1)
+                self.assertNotEqual(imported['session'],sid)
+                self.assertEqual(self.rec.active,sid)
+            with self.assertRaises(HTTPError) as rejected:
+                urlopen(Request(base+'/api/import',data=payload))
+            self.assertEqual(rejected.exception.code,403)
             time.sleep(.3)
             with urlopen(Request(base+'/api/stop',data=b'{}',headers=headers)) as response:
                 self.assertTrue(json.load(response)['ok'])
