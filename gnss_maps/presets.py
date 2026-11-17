@@ -1,4 +1,5 @@
 """Explicit one-time provisioning; map rendering itself stays offline."""
+from contextlib import closing
 import io
 import math
 from pathlib import Path
@@ -50,7 +51,7 @@ def _prepare(directory, bounds, progress=lambda s: None, cancel=None):
         temp.unlink(missing_ok=True)
         missing = 0
         try:
-            with sqlite3.connect(temp) as db:
+            with closing(sqlite3.connect(temp)) as db, db:
                 db.executescript('CREATE TABLE metadata(name TEXT PRIMARY KEY,value TEXT); CREATE TABLE tiles(zoom_level INTEGER,tile_column INTEGER,tile_row INTEGER,tile_data BLOB,PRIMARY KEY(zoom_level,tile_column,tile_row));')
                 metadata = {'name':'国土地理院 '+name, 'format':ext,'scheme':'tms','bounds':','.join(map(str,bounds)), 'minzoom':'14','maxzoom':'18','attribution':ATTRIBUTION}
                 db.executemany('INSERT INTO metadata VALUES (?,?)',metadata.items())

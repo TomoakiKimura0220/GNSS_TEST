@@ -2,6 +2,7 @@
 from collections import deque
 import argparse
 import csv
+from contextlib import closing
 import io
 import json
 import math
@@ -375,7 +376,7 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                     if not 0<=z<=22 or not 0<=x<2**z or not 0<=y<2**z:
                         raise ValueError('範囲外のタイル')
                     path=Path('data/desktop/presets')/(tile_key+'.mbtiles')
-                    with sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True) as db:
+                    with closing(sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True)) as db, db:
                         from .offline_map import tile_with_parent
                         tile=tile_with_parent(db,z,x,y)
                     return self.send(tile or b'',status=200 if tile else 404,content_type='image/png')

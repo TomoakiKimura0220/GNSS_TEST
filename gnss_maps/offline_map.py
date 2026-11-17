@@ -1,4 +1,5 @@
 """Raster MBTiles adapter. Never calls a network tile server."""
+from contextlib import closing
 import io
 import sqlite3
 from pathlib import Path
@@ -6,7 +7,7 @@ from pathlib import Path
 
 def inspect_map(path):
     path = Path(path).resolve()
-    with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as db:
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db, db:
         metadata = dict(db.execute('SELECT name,value FROM metadata'))
         first = db.execute('SELECT tile_data FROM tiles LIMIT 1').fetchone()
         if not first:
@@ -61,7 +62,7 @@ def map_widget_class():
             try:
                 row = y if source['scheme'] == 'xyz' else (1 << zoom)-1-y
                 path = Path(source['path'])
-                with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as db:
+                with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db, db:
                     result = db.execute('SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?',
                                         (zoom, x % (1 << zoom), row)).fetchone()
                 if not result:
