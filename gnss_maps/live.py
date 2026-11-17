@@ -407,7 +407,7 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                 if u.path == '/api/export':
                     data, mime = recorder.export(q.get('session',[''])[0], q.get('kind',['csv'])[0])
                     return self.send(data, content_type=mime)
-                files = {'/':('index.html','text/html; charset=utf-8'), '/app.js':('app.js','text/javascript; charset=utf-8'), '/style.css':('style.css','text/css; charset=utf-8')}
+                files = {'/mowing.js':('mowing.js','text/javascript; charset=utf-8'), '/':('index.html','text/html; charset=utf-8'), '/app.js':('app.js','text/javascript; charset=utf-8'), '/style.css':('style.css','text/css; charset=utf-8')}
                 for name,mime in [('leaflet.js','text/javascript'),('leaflet.css','text/css')]:
                     if u.path == '/vendor/leaflet/'+name:
                         return self.send((web/'vendor'/'leaflet'/name).read_bytes(),content_type=mime)
@@ -439,6 +439,16 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('操作データが不正です')
+                if self.path == '/api/mowing/export':
+                    from .mowing_export import merged_kml
+                    heading = float(data.get('heading', 'nan'))
+                    with recorder.lock:
+                        rows = recorder.db.execute('SELECT * FROM points WHERE session=? AND id<=? ORDER BY id', (str(data.get('session', '')), int(data.get('last', 0)))).fetchall()
+                    from .mowing_heading import track
+                    rows = [r for r in track([dict(r) for r in rows]) if r['id'] >= int(data.get('first', 0))]
+                    if len(rows) > 50000:
+                        raise ValueError('書き出せる測位点は50,000点までです')
+                    return self.send(merged_kml([dict(r) for r in rows], heading, str(data.get('title', '計測'))[:120]))
                 if self.path == '/api/maps/prepare':
                     with recorder.lock:
                         bounds = recorder.db.execute('SELECT MIN(lon),MIN(lat),MAX(lon),MAX(lat) FROM points WHERE session=?',(str(data.get('session','')),)).fetchone()
