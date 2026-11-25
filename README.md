@@ -7,6 +7,8 @@ Google航空写真も選べますが、利用者自身のAPIキーとPCのイン
 
 初めて使う場合は「導入と起動」から「計測と生データの保存」まで進めてください。履歴、地図、ファイル構造は必要なときに参照できます。
 
+機能追加の経緯と具体的な変更理由は、[日時付きの開発履歴](docs/CHANGE_HISTORY.md)にまとめています。
+
 ## 機器とデータの流れ
 
 ```text
@@ -335,6 +337,7 @@ GNSS_TEST/
 │   ├── offline_map.py        # MBTilesの検査とTkinter版の地図表示
 │   └── presets.py            # 国土地理院画像の事前取得
 ├── docs/
+│   ├── CHANGE_HISTORY.md     # 日時ごとの機能追加と変更理由
 │   ├── LIVE.md               # ブラウザー版の詳しい操作・制限
 │   ├── DESKTOP.md            # デスクトップ版の操作・地図の準備
 │   └── CONVERSION.md         # KML変換、NMEAの形式、座標変換
