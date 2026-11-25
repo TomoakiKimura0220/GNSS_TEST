@@ -13,3 +13,5 @@
 .map-stage{position:relative}.map-choices{position:absolute;right:10px;top:10px;z-index:1000;background:white;border:1px solid #bdcdd1;border-radius:8px;padding:8px 12px;margin:0;max-width:calc(100% - 70px)}.map-choices legend{font-size:12px;background:white}.map-choices label{display:flex;align-items:center;gap:6px;margin:7px 0;font-size:12px}.map-choices input[type=radio]{display:inline-block;width:auto;padding:0;margin:0}#googleMap{height:440px;border-radius:6px;overflow:hidden}@media(max-width:850px){#googleMap{height:360px}}
 
 .range-selection{border:1px solid #ccdadc;border-radius:8px;padding:12px 16px;margin:12px 0}.range-selection legend{font-size:14px}.range-selection output{font-size:13px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+
+#precision{height:520px;background:#fff}.precision-label{font:11px "IBM Plex Mono",monospace;color:#334155;background:#ffffffcc;text-align:center;white-space:nowrap}

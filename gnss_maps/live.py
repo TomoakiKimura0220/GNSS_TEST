@@ -432,7 +432,7 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                 if u.path == '/api/export':
                     data, mime = recorder.export(q.get('session',[''])[0], q.get('kind',['csv'])[0])
                     return self.send(data, content_type=mime)
-                files = {'/mowing.js':('mowing.js','text/javascript; charset=utf-8'), '/':('index.html','text/html; charset=utf-8'), '/app.js':('app.js','text/javascript; charset=utf-8'), '/style.css':('style.css','text/css; charset=utf-8')}
+                files = {'/precision.js':('precision.js','text/javascript; charset=utf-8'), '/mowing.js':('mowing.js','text/javascript; charset=utf-8'), '/':('index.html','text/html; charset=utf-8'), '/app.js':('app.js','text/javascript; charset=utf-8'), '/style.css':('style.css','text/css; charset=utf-8')}
                 for name,mime in [('leaflet.js','text/javascript'),('leaflet.css','text/css')]:
                     if u.path == '/vendor/leaflet/'+name:
                         return self.send((web/'vendor'/'leaflet'/name).read_bytes(),content_type=mime)
