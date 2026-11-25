@@ -20,6 +20,8 @@ import uuid
 import webbrowser
 import xml.etree.ElementTree as ET
 
+from dotenv import load_dotenv
+
 from .nmea import parse_gga
 from .timed import time_seconds, NS
 
@@ -481,6 +483,7 @@ def main():
     parser.add_argument('--replay', type=Path, help='保存済みログを5Hz相当で再生する入力候補')
     parser.add_argument('--no-browser', action='store_true')
     args = parser.parse_args()
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False, encoding="utf-8-sig")
     recorder = Recorder(args.data_dir, args.replay)
     try:
         server = make_server(recorder, args.port, os.environ.get('GOOGLE_MAPS_API_KEY',''), os.environ.get('GOOGLE_MAPS_MAP_ID','DEMO_MAP_ID'))
