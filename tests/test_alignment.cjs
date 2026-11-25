@@ -1,0 +1,15 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const source=fs.readFileSync(path.join(__dirname,'../gnss_maps/web/app.js'),'utf8');
+const els={alignEnabled:{checked:true},showOutline:{checked:true}};
+const raw=[{id:2,lat:34.9999,lon:136.9999,quality:2},{id:3,lat:35,lon:137,quality:2}];
+const c=vm.createContext({$:id=>els[id]??={},points:raw,rangeStart:0,rangeLast:()=>1,selected:'run',referencePoint:{id:1,lat:35,lon:137,quality:4},matchPoint:{...raw[0],session:'run'},referenceOutline:[{quality:4,segment:0},{quality:4,segment:0},{quality:2,segment:0},{quality:4,segment:0}],draw(){},mowingUrls:[],when:()=>'',cursor:0});
+vm.runInContext(source.slice(source.indexOf('function alignment()')),c);
+let corrected=vm.runInContext('displayPoints(points)',c);
+assert.equal(corrected[0].lat,35);assert.equal(corrected[0].lon,137);assert.equal(corrected[0].quality,2);
+assert.equal(raw[0].lat,34.9999);
+assert.equal(vm.runInContext('referenceGroups().length',c),1);
+els.alignEnabled.checked=false;
+assert.equal(vm.runInContext('displayPoints(points)',c),raw);
+c.matchPoint.id=99;
+assert.equal(vm.runInContext('alignment()',c),null);
+console.log('Alignment preview: passed');

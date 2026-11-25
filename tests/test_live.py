@@ -161,6 +161,16 @@ class LiveTests(unittest.TestCase):
             with urlopen(Request(base+'/api/stop',data=b'{}',headers=headers)) as response:
                 self.assertTrue(json.load(response)['ok'])
             self.assertGreater(len(self.rec.points(sid)),0)
+            point=self.rec.points(sid)[0]
+            body=json.dumps(dict(session=sid,first=point['id'],last=point['id'],title='実験1')).encode()
+            with urlopen(Request(base+'/api/experiments',data=body,headers=headers)) as response:
+                exp=json.load(response)
+            with urlopen(base+'/api/experiment?id='+exp['id']) as response:
+                opened=json.load(response)
+                self.assertEqual(len(opened['points']),1)
+                self.assertEqual(opened['experiment']['title'],'実験1')
+            with urlopen(base+'/api/experiments') as response:
+                self.assertEqual(len(json.load(response)),1)
             with self.assertRaises(HTTPError):
                 urlopen(Request(base+'/api/sessions',headers={'Host':'evil.example'}))
         finally:

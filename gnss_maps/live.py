@@ -89,6 +89,8 @@ class Recorder:
         ''')
         self.db.execute("UPDATE sessions SET status='interrupted', ended=? WHERE status='recording'", (utc_now(),))
         self.db.commit()
+        from .experiments import initialise
+        initialise(self.db)
         self.stop_event = threading.Event()
         self.thread = None
         self.active = None
@@ -358,6 +360,26 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
             u = urlparse(self.path)
             q = parse_qs(u.query)
             try:
+                if u.path == '/api/experiments':
+                    from .experiments import list_saved
+                    with recorder.lock:
+                        return self.send(list_saved(recorder.db))
+                if u.path == '/api/experiment':
+                    from .experiments import load
+                    with recorder.lock:
+                        experiment = load(recorder.db, q.get('id', [''])[0])
+                        rows = recorder.db.execute('SELECT * FROM points WHERE session=? AND id>=? AND id<=? ORDER BY id LIMIT 50001', (experiment['session'], experiment['first'], experiment['last'])).fetchall()
+                        if len(rows) > 50000:
+                            raise ValueError('この区間は50,000点を超えます。短い区間に分けてください')
+                        reference = experiment['reference']
+                        outline = []
+                        if reference:
+                            outline = [dict(r) for r in recorder.db.execute('SELECT * FROM points WHERE session=? ORDER BY id', (reference['session'],))]
+                    from .mowing_heading import track
+                    with recorder.lock:
+                        prior = recorder.db.execute('SELECT * FROM points WHERE session=? AND id<=? ORDER BY id', (experiment['session'], experiment['last'])).fetchall()
+                    tracked = [p for p in track([dict(r) for r in prior]) if p['id'] >= experiment['first']]
+                    return self.send(dict(experiment=experiment, points=tracked, outline=outline))
                 if u.path == '/api/config':
                     return self.send(dict(token=token, maps_key=key, map_id=map_id, replay=bool(recorder.replay)))
                 if u.path == '/api/maps':
@@ -442,6 +464,10 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('操作データが不正です')
+                if self.path == '/api/experiments':
+                    from .experiments import save
+                    with recorder.lock:
+                        return self.send(save(recorder.db, data))
                 if self.path == '/api/mowing/export':
                     from .mowing_export import merged_kml
                     heading = float(data.get('heading', 'nan'))
@@ -451,6 +477,13 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                     rows = [r for r in track([dict(r) for r in rows]) if r['id'] >= int(data.get('first', 0))]
                     if len(rows) > 50000:
                         raise ValueError('書き出せる測位点は50,000点までです')
+                    if data.get('experiment'):
+                        from .experiments import load, translate
+                        with recorder.lock:
+                            exp = load(recorder.db, str(data['experiment']))
+                        if exp['session'] != str(data.get('session')) or int(data.get('first', 0)) < exp['first'] or int(data.get('last', 0)) > exp['last']:
+                            raise ValueError('保存区間と出力範囲が一致しません')
+                        rows = translate(rows, exp)
                     return self.send(merged_kml([dict(r) for r in rows], heading, str(data.get('title', '計測'))[:120], float(data.get('front', .3)), float(data.get('side', 0))))
                 if self.path == '/api/maps/prepare':
                     with recorder.lock:
