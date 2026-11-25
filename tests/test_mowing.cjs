@@ -44,6 +44,7 @@ const northOffset=m.blade(a,0,.4,.2).center;
 assert.ok(northOffset[0]>a.lat && northOffset[1]>a.lon);
 const eastOffset=m.blade(a,90,.4,.2).center;
 assert.ok(eastOffset[0]<a.lat && eastOffset[1]>a.lon);
-assert.deepEqual(m.blade(a,0,0,0).center,[a.lat,a.lon]);
+assert.equal(m.blade(a,0,0,0).center[0],a.lat);
+assert.equal(m.blade(a,0,0,0).center[1],a.lon);
 assert.ok(m.blade(a,0,-.4,-.2).center[0]<a.lat);
 console.log('Configurable antenna offsets: passed');
