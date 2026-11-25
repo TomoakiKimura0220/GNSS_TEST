@@ -38,3 +38,14 @@ class CoverageTests(unittest.TestCase):
         shifted=calculate(self.boundary(),[self.p(-.5,5)],0,1)
         self.assertEqual(original['covered_area'],0)
         self.assertGreater(shifted['covered_area'],0)
+
+    def test_repair_small_loop_and_reject_large_crossing(self):
+        # A tiny loop at the corner of the 10 m square.
+        boundary=[self.p(x,y) for x,y in [(0,0),(-.01,0),(-.01,-.01),(0,0),(10,0),(10,10),(0,10),(0,0)]]
+        repaired=calculate(boundary,[self.p(5,5)],0,0,True,True)
+        self.assertTrue(repaired['repaired'])
+        self.assertAlmostEqual(repaired['boundary_area'],100,5)
+        self.assertGreater(repaired['removed_area'],0)
+        crossed=[self.p(x,y) for x,y in [(0,0),(10,10),(0,10),(10,0),(0,0)]]
+        with self.assertRaisesRegex(ValueError,'大きい'):
+            calculate(crossed,[self.p(5,5)],0,0,True,True)

@@ -1,6 +1,6 @@
 'use strict';
 let precisionView=null,precisionNeedsFit=false;
-let comparisonPair=null,coverageSignature=null,coverageBusy=false;
+let comparisonPair=null,coverageSignature=null,coverageBusy=false,repairedBoundary=null;
 const $ = id => document.getElementById(id);
 const colors={1:'#64748b',2:'#d97706',4:'#059669',5:'#7c3aed'};
 const labels={0:'測位不可',1:'単独測位',2:'差分補正',4:'RTK FIX',5:'RTK FLOAT'};
@@ -255,6 +255,7 @@ function updateAlignmentInfo(){
  $('previousPoint').disabled=!points.length||cursor<=rangeStart;$('nextPoint').disabled=!points.length||cursor>=rangeLast();
 }
 function referenceGroups(){
+ if($('showOutline').checked&&coverageSignature===coverageState()&&repairedBoundary)return repairedBoundary.map(r=>r.map(p=>({lat:p[0],lon:p[1]})));
  if(!$('showOutline').checked)return [];
  const groups=[];let current=null,previous=null;
  for(const p of referenceOutline){if(p.quality!==4){current=null;previous=null;continue;}if(!current||p.segment!==previous.segment){current=[];groups.push(current);}current.push(p);previous=p;}
@@ -311,18 +312,18 @@ $('compareExperiments').onclick=async()=>{
  }catch(e){error(e.message);}finally{$('compareExperiments').disabled=false;}
 };
 
-function coverageState(){return JSON.stringify([generation,comparisonPair,savedExperiment?.id,points[rangeStart]?.id,points[cursor]?.id,mowingFront,mowingSide,mowingOffsetValid,$('alignEnabled').checked,$('closeBoundary').checked]);}
-$('closeBoundary').onchange=draw;
+function coverageState(){return JSON.stringify([generation,comparisonPair,savedExperiment?.id,points[rangeStart]?.id,points[cursor]?.id,mowingFront,mowingSide,mowingOffsetValid,$('alignEnabled').checked,$('closeBoundary').checked,$('repairBoundary').checked]);}
+$('closeBoundary').onchange=draw;$('repairBoundary').onchange=draw;
 $('calculateCoverage').onclick=async()=>{
  if(coverageBusy)return;
  if(!comparisonPair||savedExperiment?.id!==comparisonPair.experiment){error('先に外周と実験の2つの区間を重ねて表示してください。');return;}
  if(!mowingOffsetValid||!points.length){error('位置補正と表示点を確認してください。');return;}
  stopPlay();$('follow').checked=false;
  const signature=coverageState();coverageBusy=true;$('calculateCoverage').disabled=true;$('coverageResult').textContent='面積を計算しています…';
- try{const result=await api('/api/coverage',{...comparisonPair,first:points[rangeStart].id,last:points[cursor].id,front:mowingFront,side:mowingSide,aligned:$('alignEnabled').checked,close_boundary:$('closeBoundary').checked});
+ try{const result=await api('/api/coverage',{...comparisonPair,first:points[rangeStart].id,last:points[cursor].id,front:mowingFront,side:mowingSide,aligned:$('alignEnabled').checked,close_boundary:$('closeBoundary').checked,repair_boundary:$('repairBoundary').checked});
  if(signature!==coverageState()){$('coverageResult').textContent='計算中に設定が変わりました。再計算してください。';return;}
  const f=n=>n.toLocaleString('ja-JP',{minimumFractionDigits:4,maximumFractionDigits:4});
  $('coverageResult').textContent=`${result.experiment_title} ／ 外周：${result.boundary_title}\n① 重複を除いた推定刈り幅の面積：${f(result.footprint_area)} m²\n② 外周外の面積：${f(result.outside_area)} m²\n③ 外周内の塗りつぶし面積：① − ② = ${f(result.footprint_area)} − ${f(result.outside_area)} = ${f(result.covered_area)} m²\n④ 外周の面積：${f(result.boundary_area)} m²\n塗りつぶし率 = ③ ÷ ④ × 100 = ${f(result.covered_area)} ÷ ${f(result.boundary_area)} × 100 = ${result.percent.toFixed(2)} %\n未塗りつぶし面積 = ④ − ③ = ${f(result.uncovered_area)} m²\n対象：${result.points}点／選択時点まで。外周の閉じ線：${result.closing_gap.toFixed(3)} m。計算は丸め前の値を使用。`;
- coverageSignature=signature;error('');
+ coverageSignature=signature;repairedBoundary=result.repaired?result.boundary_rings:null;if(result.repaired)$('coverageResult').textContent+=`\n外周を補修しました（最大の面を採用）。除外した小領域：${f(result.removed_area)} m²。地図・平面図の外周線を確認してください。`;error('');draw();
  }catch(e){$('coverageResult').textContent='計算できません：'+e.message;coverageSignature=null;}finally{coverageBusy=false;$('calculateCoverage').disabled=false;}
 };
