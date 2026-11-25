@@ -1,5 +1,6 @@
 'use strict';
 let precisionView=null,precisionNeedsFit=false;
+let comparisonPair=null,coverageSignature=null,coverageBusy=false;
 const $ = id => document.getElementById(id);
 const colors={1:'#64748b',2:'#d97706',4:'#059669',5:'#7c3aed'};
 const labels={0:'測位不可',1:'単独測位',2:'差分補正',4:'RTK FIX',5:'RTK FLOAT'};
@@ -16,6 +17,7 @@ async function api(path,body){const r=await fetch(path,body?{method:'POST',heade
 function clearMap(){for(const line of lines)line.remove();lines=[];if(marker){marker.remove();marker=null;}}
 function chunks(visible){const groups=[];for(const p of visible){let last=groups.at(-1);if(!last||last.at(-1).segment!==p.segment||last.at(-1).quality!==p.quality){const previous=last?.at(-1);last=[];if(previous&&previous.segment===p.segment)last.push(previous);groups.push(last);}last.push(p);}return groups;}
 function draw(){
+ if(coverageSignature&&coverageSignature!==coverageState()){coverageSignature=null;$('coverageResult').textContent='区間・表示時点・設定が変わりました。再計算してください。';}
  syncRange();
  const visible=displayPoints(points.slice(rangeStart,cursor+1)),p=visible.at(-1);
  updateAlignmentInfo();
@@ -256,7 +258,7 @@ function referenceGroups(){
  if(!$('showOutline').checked)return [];
  const groups=[];let current=null,previous=null;
  for(const p of referenceOutline){if(p.quality!==4){current=null;previous=null;continue;}if(!current||p.segment!==previous.segment){current=[];groups.push(current);}current.push(p);previous=p;}
- return groups.filter(g=>g.length>1);
+ const valid=groups.filter(g=>g.length>1);if($('closeBoundary').checked&&valid.length===1)valid[0]=[...valid[0],valid[0][0]];return valid;
 }
 function drawReferenceLeaflet(){for(const g of referenceGroups())lines.push(L.polyline(g.map(p=>[p.lat,p.lon]),{color:'#059669',weight:3,opacity:.6,dashArray:'6 5'}).addTo(map));if(referencePoint&&$('showOutline').checked)lines.push(L.circleMarker([referencePoint.lat,referencePoint.lon],{radius:9,color:'#059669',fillOpacity:0}).addTo(map));}
 function drawReferenceGoogle(){for(const g of referenceGroups())googleOverlays.push(new google.maps.Polyline({map:googleMap,path:g.map(p=>({lat:p.lat,lng:p.lon})),strokeColor:'#059669',strokeWeight:3,strokeOpacity:.6,clickable:false}));if(referencePoint&&$('showOutline').checked)googleOverlays.push(new google.maps.Marker({map:googleMap,position:{lat:referencePoint.lat,lng:referencePoint.lon},title:'FIX基準点',icon:{path:google.maps.SymbolPath.CIRCLE,scale:9,fillOpacity:0,strokeColor:'#059669',strokeWeight:2}}));}
@@ -302,9 +304,25 @@ $('compareExperiments').onclick=async()=>{
   if(!boundary.points.some(p=>p.quality===4))throw Error('外周の区間にFIX点がありません。');
   $('experiments').value=runId;await $('openExperiment').onclick();
   if(savedExperiment?.id!==runId)return;
-  referenceOutline=boundary.points;$('showOutline').checked=true;$('mowingMode').checked=true;
+  comparisonPair={boundary:boundaryId,experiment:runId};referenceOutline=boundary.points;$('showOutline').checked=true;$('mowingMode').checked=true;
   $('comparisonStatus').textContent=`外周：${boundary.experiment.title}（FIXのみ・未補正）／実験：${savedExperiment.title}（前後 ${mowingFront*100} cm、左右 ${mowingSide*100} cm）。航空写真は地図右上で選択、平面図は専用タブで表示します。`;
   if(!referencePoint)$('alignEnabled').checked=false;
   precisionNeedsFit=true;draw();fit();error('');
  }catch(e){error(e.message);}finally{$('compareExperiments').disabled=false;}
+};
+
+function coverageState(){return JSON.stringify([generation,comparisonPair,savedExperiment?.id,points[rangeStart]?.id,points[cursor]?.id,mowingFront,mowingSide,mowingOffsetValid,$('alignEnabled').checked,$('closeBoundary').checked]);}
+$('closeBoundary').onchange=draw;
+$('calculateCoverage').onclick=async()=>{
+ if(coverageBusy)return;
+ if(!comparisonPair||savedExperiment?.id!==comparisonPair.experiment){error('先に外周と実験の2つの区間を重ねて表示してください。');return;}
+ if(!mowingOffsetValid||!points.length){error('位置補正と表示点を確認してください。');return;}
+ stopPlay();$('follow').checked=false;
+ const signature=coverageState();coverageBusy=true;$('calculateCoverage').disabled=true;$('coverageResult').textContent='面積を計算しています…';
+ try{const result=await api('/api/coverage',{...comparisonPair,first:points[rangeStart].id,last:points[cursor].id,front:mowingFront,side:mowingSide,aligned:$('alignEnabled').checked,close_boundary:$('closeBoundary').checked});
+ if(signature!==coverageState()){$('coverageResult').textContent='計算中に設定が変わりました。再計算してください。';return;}
+ const f=n=>n.toLocaleString('ja-JP',{minimumFractionDigits:4,maximumFractionDigits:4});
+ $('coverageResult').textContent=`${result.experiment_title} ／ 外周：${result.boundary_title}\n① 重複を除いた推定刈り幅の面積：${f(result.footprint_area)} m²\n② 外周外の面積：${f(result.outside_area)} m²\n③ 外周内の塗りつぶし面積：① − ② = ${f(result.footprint_area)} − ${f(result.outside_area)} = ${f(result.covered_area)} m²\n④ 外周の面積：${f(result.boundary_area)} m²\n塗りつぶし率 = ③ ÷ ④ × 100 = ${f(result.covered_area)} ÷ ${f(result.boundary_area)} × 100 = ${result.percent.toFixed(2)} %\n未塗りつぶし面積 = ④ − ③ = ${f(result.uncovered_area)} m²\n対象：${result.points}点／選択時点まで。外周の閉じ線：${result.closing_gap.toFixed(3)} m。計算は丸め前の値を使用。`;
+ coverageSignature=signature;error('');
+ }catch(e){$('coverageResult').textContent='計算できません：'+e.message;coverageSignature=null;}finally{coverageBusy=false;$('calculateCoverage').disabled=false;}
 };

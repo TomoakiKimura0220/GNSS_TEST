@@ -15,3 +15,5 @@
 .range-selection{border:1px solid #ccdadc;border-radius:8px;padding:12px 16px;margin:12px 0}.range-selection legend{font-size:14px}.range-selection output{font-size:13px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 
 #precision{height:520px;background:#fff}.precision-label{font:11px "IBM Plex Mono",monospace;color:#334155;background:#ffffffcc;text-align:center;white-space:nowrap}
+
+#coverageResult{white-space:pre-wrap;font-variant-numeric:tabular-nums}

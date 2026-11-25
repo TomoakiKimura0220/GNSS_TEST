@@ -6,12 +6,12 @@ from shapely.ops import unary_union
 from shapely.geometry.polygon import orient
 
 
-def merged_kml(points, heading, title, front=.3, side=0):
+def footprint(points, heading=0, front=.3, side=0, origin=None):
     if not all(math.isfinite(v) and abs(v) <= 10 for v in (front, side)):
         raise ValueError("位置補正は前後・左右とも−10〜10 mで指定してください")
     if not points or not math.isfinite(heading):
         raise ValueError('測位点と有効な固定方位が必要です')
-    lat, lon = points[0]['lat'], points[0]['lon']
+    lat, lon = origin if origin is not None else (points[0]['lat'], points[0]['lon'])
     rad = math.pi / 180
     d = 1 - .00669437999014 * math.sin(lat * rad)**2
     north = 6378137 * (1-.00669437999014) / d**1.5 * rad
@@ -26,6 +26,11 @@ def merged_kml(points, heading, title, front=.3, side=0):
         groups[-1][1].append(((p['lon']-lon)*east+dx, (p['lat']-lat)*north+dy))
     shapes = [(LineString(coords) if len(set(coords)) > 1 else Point(coords[0])).buffer(.25, quad_segs=8) for _, coords in groups]
     merged = unary_union(shapes)
+    return merged, lat, lon, north, east
+
+
+def merged_kml(points, heading, title, front=.3, side=0):
+    merged, lat, lon, north, east = footprint(points, heading, front, side)
     polygons = [merged] if merged.geom_type == 'Polygon' else list(merged.geoms)
     root = ET.Element('kml', xmlns='http://www.opengis.net/kml/2.2')
     doc = ET.SubElement(root, 'Document')

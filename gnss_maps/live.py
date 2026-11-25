@@ -464,6 +464,11 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('操作データが不正です')
+                if self.path == '/api/coverage':
+                    from .coverage import from_database
+                    with recorder.lock:
+                        result = from_database(recorder.db, data)
+                    return self.send(result)
                 if self.path == '/api/experiments':
                     from .experiments import save
                     with recorder.lock:
