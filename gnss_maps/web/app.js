@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const colors={1:'#64748b',2:'#d97706',4:'#059669',5:'#7c3aed'};
 const labels={0:'測位不可',1:'単独測位',2:'差分補正',4:'RTK FIX',5:'RTK FLOAT'};
+let mowingFront=.3,mowingSide=0,mowingOffsetValid=true;
 let mowingHeading=0, mowingSeed=null, mowingExportBusy=false;
 let rangeStart=0, rangeEnd=null;
 let config, state={}, selected=null, points=[], cursor=0, generation=0, playing=null, fetchingGeneration=null;
@@ -15,9 +16,9 @@ function chunks(visible){const groups=[];for(const p of visible){let last=groups
 function draw(){
  syncRange();
  const visible=points.slice(rangeStart,cursor+1),p=visible.at(-1);
- const mowing=$('mowingMode').checked;
+ const mowing=$('mowingMode').checked&&mowingOffsetValid;
  $('mowingKml').disabled=mowingExportBusy||!mowing||mowingHeading===null||!visible.length;
- $('mowingStatus').textContent=!mowing?'OFF：アンテナの測位経路を表示します。':`推定帯：直径50 cm・機体前方30 cm補正／北向き前進で開始。現在 ${p?.heading?.toFixed(1)??'0'}°・${p?.reverse?'後退':'前進'}（推定）。青点は刃の中心。`;
+ $('mowingStatus').textContent=!mowing?'OFF：アンテナの測位経路を表示します。':`推定帯：直径50 cm・前後 ${mowingFront*100} cm・左右 ${mowingSide*100} cm補正／北向き前進で開始。現在 ${p?.heading?.toFixed(1)??'0'}°・${p?.reverse?'後退':'前進'}（推定）。青点は刃の中心。`;
 
  $('count').textContent=points.length.toLocaleString();$('cursor').min=rangeStart;$('cursor').max=rangeLast();$('cursor').disabled=!points.length;$('cursor').value=cursor;
  const viewingLive=selected===state.active&&state.running&&$('follow').checked;
@@ -30,11 +31,11 @@ function draw(){
  if(activeView==='map'&&baseMap==='google'&&googleMap){drawGoogle(visible,p,viewingLive,fresh,mowing);}
  else if(activeView==='map'&&map){clearMap();
   if(mowing&&mowingHeading!==null){
-   const groups={};for(const strip of Mowing.strips(visible,mowingHeading))(groups[strip.quality]??=[]).push([strip.ring]);
+   const groups={};for(const strip of Mowing.strips(visible,mowingHeading,mowingFront,mowingSide))(groups[strip.quality]??=[]).push([strip.ring]);
    for(const [quality,rings]of Object.entries(groups))lines.push(L.polygon(rings,{stroke:false,fillColor:colors[quality],fillOpacity:.55,fillRule:'nonzero',smoothFactor:0,interactive:false}).addTo(map));
   }
   for(const group of chunks(visible)){if(group.length>1)lines.push(L.polyline(group.map(p=>[p.lat,p.lon]),{color:colors[group.at(-1).quality],weight:mowing&&mowingHeading!==null?1:4,opacity:mowing&&mowingHeading!==null?.35:1}).addTo(map));}
-  if(p&&(!viewingLive||fresh)){const position=mowing&&mowingHeading!==null?Mowing.blade(p,p.heading??0).center:[p.lat,p.lon];marker=L.circleMarker(position,{radius:7,color:'#005bac',fillOpacity:1}).addTo(map);marker.bindTooltip((mowing&&mowingHeading!==null?'推定した刃の中心 · ':'アンテナ · ')+when(p));if($('follow').checked)map.panTo([p.lat,p.lon]);}
+  if(p&&(!viewingLive||fresh)){const position=mowing&&mowingHeading!==null?Mowing.blade(p,p.heading??0,mowingFront,mowingSide).center:[p.lat,p.lon];marker=L.circleMarker(position,{radius:7,color:'#005bac',fillOpacity:1}).addTo(map);marker.bindTooltip((mowing&&mowingHeading!==null?'推定した刃の中心 · ':'アンテナ · ')+when(p));if($('follow').checked)map.panTo([p.lat,p.lon]);}
  }else if(activeView==='scatter')drawScatter(visible);
  else if(activeView==='series')drawSeries();
  else if(activeView==='raw')scheduleRaw();
@@ -72,7 +73,7 @@ $('mowingMode').onchange=draw;
 $('seriesField').onchange=drawSeries;$('rawFilter').onchange=scheduleRaw;$('rawPause').onchange=()=>{rawGeneration++;if(!$('rawPause').checked)scheduleRaw();};
 async function ports(){const entries=await api('/api/ports');const old=$('source').value;$('source').replaceChildren();for(const e of [{device:'demo',description:'デモ（架空の位置）'},...(config.replay?[{device:'replay',description:'指定したログを再生'}]:[]),...entries]){const option=document.createElement('option');option.value=e.device;option.textContent=e.device==='demo'||e.device==='replay'?e.description:`${e.device} · ${e.description}`;$('source').append(option);}if([...$('source').options].some(o=>o.value===old))$('source').value=old;}
 async function history(){const sessions=await api('/api/sessions');$('sessions').replaceChildren();for(const s of sessions){const button=document.createElement('button');button.className='session'+(s.id===selected?' active':'');button.textContent=s.title+(s.source==='demo'?' [デモ]':s.source==='replay'?' [ログ再生]':s.source==='import'?' [インポート]':'');const detail=document.createElement('small');detail.textContent=`${dateFmt.format(new Date(s.started))} · ${s.point_count}点 · FIX ${s.fix_count}点 · ${s.status}`;button.append(detail);button.onclick=()=>select(s.id,s.title).catch(e=>error(e.message));$('sessions').append(button);}}
-async function select(sid,title){generation++;selected=sid;currentTitle=title;for(const url of mowingUrls)URL.revokeObjectURL(url);mowingUrls=[];$('mowingDownloads').replaceChildren();mowingHeading=0;mowingSeed=null;points=[];cursor=0;rangeStart=0;rangeEnd=null;stopPlay();$('follow').checked=sid===state.active&&state.running;for(const kind of ['csv','kml','log']){$(kind).href=`/api/export?session=${sid}&kind=${kind}`;$(kind).download=`${sid}.${kind}`;}draw();await fetchPoints();cursor=Math.max(0,points.length-1);draw();fit();await history();}
+async function select(sid,title){generation++;selected=sid;currentTitle=title;for(const url of mowingUrls)URL.revokeObjectURL(url);mowingUrls=[];$('mowingDownloads').replaceChildren();mowingHeading=0;mowingSeed=null;mowingFront=.3;mowingSide=0;mowingOffsetValid=true;$('mowingFront').value=30;$('mowingSide').value=0;$('mowingOffsetError').textContent='';points=[];cursor=0;rangeStart=0;rangeEnd=null;stopPlay();$('follow').checked=sid===state.active&&state.running;for(const kind of ['csv','kml','log']){$(kind).href=`/api/export?session=${sid}&kind=${kind}`;$(kind).download=`${sid}.${kind}`;}draw();await fetchPoints();cursor=Math.max(0,points.length-1);draw();fit();await history();}
 async function fetchPoints(){
  if(!selected||fetchingGeneration===generation)return;
  const gen=generation,sid=selected;fetchingGeneration=gen;
@@ -125,14 +126,14 @@ $('prepareMap').onclick=async()=>{
 
 let mowingUrls=[];
 $('mowingKml').onclick=async()=>{
- if(mowingExportBusy)return;
+ if(mowingExportBusy||!mowingOffsetValid)return;
  mowingExportBusy=true;
  const sid=selected,gen=generation;
  const visible=points.slice(rangeStart,cursor+1);
  $('mowingKml').disabled=true;
  $('mowingDownloads').textContent='帯の重なりを統合しています…';
  try{
-  const result=await api('/api/mowing/export',{session:sid,first:visible[0].id,last:visible.at(-1).id,heading:mowingHeading,title:currentTitle});
+  const result=await api('/api/mowing/export',{session:sid,first:visible[0].id,last:visible.at(-1).id,heading:mowingHeading,front:mowingFront,side:mowingSide,title:currentTitle});
   if(gen!==generation)return;
   for(const url of mowingUrls)URL.revokeObjectURL(url);mowingUrls=[];
   $('mowingDownloads').replaceChildren();
@@ -189,9 +190,9 @@ async function switchMap(next){
 function drawGoogle(visible,p,viewingLive,fresh,mowing){
  for(const item of googleOverlays)item.setMap(null);googleOverlays=[];
  const position=pair=>({lat:pair[0],lng:pair[1]});
- if(mowing&&mowingHeading!==null)for(const strip of Mowing.strips(visible,mowingHeading))googleOverlays.push(new google.maps.Polygon({map:googleMap,paths:strip.ring.map(position),strokeWeight:0,fillColor:colors[strip.quality],fillOpacity:.55,clickable:false}));
+ if(mowing&&mowingHeading!==null)for(const strip of Mowing.strips(visible,mowingHeading,mowingFront,mowingSide))googleOverlays.push(new google.maps.Polygon({map:googleMap,paths:strip.ring.map(position),strokeWeight:0,fillColor:colors[strip.quality],fillOpacity:.55,clickable:false}));
  for(const group of chunks(visible))if(group.length>1)googleOverlays.push(new google.maps.Polyline({map:googleMap,path:group.map(p=>({lat:p.lat,lng:p.lon})),strokeColor:colors[group.at(-1).quality],strokeWeight:mowing?1:4,strokeOpacity:mowing?.35:1,clickable:false}));
- if(p&&(!viewingLive||fresh)){const center=position(mowing&&mowingHeading!==null?Mowing.blade(p,p.heading??0).center:[p.lat,p.lon]);googleOverlays.push(new google.maps.Marker({map:googleMap,position:center,title:when(p),icon:{path:google.maps.SymbolPath.CIRCLE,scale:7,fillColor:'#005bac',fillOpacity:1,strokeWeight:1,strokeColor:'#fff'}}));if($('follow').checked)googleMap.panTo({lat:p.lat,lng:p.lon});}
+ if(p&&(!viewingLive||fresh)){const center=position(mowing&&mowingHeading!==null?Mowing.blade(p,p.heading??0,mowingFront,mowingSide).center:[p.lat,p.lon]);googleOverlays.push(new google.maps.Marker({map:googleMap,position:center,title:when(p),icon:{path:google.maps.SymbolPath.CIRCLE,scale:7,fillColor:'#005bac',fillOpacity:1,strokeWeight:1,strokeColor:'#fff'}}));if($('follow').checked)googleMap.panTo({lat:p.lat,lng:p.lon});}
 }
 for(const input of document.querySelectorAll('[name=basemap]'))input.addEventListener('change',()=>switchMap(input.value));
 window.addEventListener('offline',()=>{if(baseMap==='google'){switchMap('std');mapNotice('インターネット接続が切れたため、国土地理院の地図へ戻しました。受信・記録は継続します。');}});
@@ -219,3 +220,13 @@ $('rangeEnd').oninput=e=>changeRange('end',e.target.value);
 $('rangeStartHere').onclick=()=>changeRange('start',cursor);
 $('rangeEndHere').onclick=()=>changeRange('end',cursor);
 $('rangeReset').onclick=()=>{stopPlay();rangeStart=0;rangeEnd=null;cursor=rangeLast();draw();fit();};
+
+function updateMowingOffset(){
+ const front=$('mowingFront'),side=$('mowingSide');
+ mowingOffsetValid=front.value!==''&&side.value!==''&&front.checkValidity()&&side.checkValidity();
+ $('mowingOffsetError').textContent=mowingOffsetValid?'':'前後・左右とも−1000〜1000 cmの数値を入力してください。補正表示と草刈り幅KMLを停止しています。';
+ if(mowingOffsetValid){mowingFront=Number(front.value)/100;mowingSide=Number(side.value)/100;}
+ for(const url of mowingUrls)URL.revokeObjectURL(url);mowingUrls=[];$('mowingDownloads').replaceChildren();
+ draw();
+}
+$('mowingFront').oninput=updateMowingOffset;$('mowingSide').oninput=updateMowingOffset;

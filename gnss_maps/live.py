@@ -449,7 +449,7 @@ def make_server(recorder, port, key='', map_id='DEMO_MAP_ID'):
                     rows = [r for r in track([dict(r) for r in rows]) if r['id'] >= int(data.get('first', 0))]
                     if len(rows) > 50000:
                         raise ValueError('書き出せる測位点は50,000点までです')
-                    return self.send(merged_kml([dict(r) for r in rows], heading, str(data.get('title', '計測'))[:120]))
+                    return self.send(merged_kml([dict(r) for r in rows], heading, str(data.get('title', '計測'))[:120], float(data.get('front', .3)), float(data.get('side', 0))))
                 if self.path == '/api/maps/prepare':
                     with recorder.lock:
                         bounds = recorder.db.execute('SELECT MIN(lon),MIN(lat),MAX(lon),MAX(lat) FROM points WHERE session=?',(str(data.get('session','')),)).fetchone()

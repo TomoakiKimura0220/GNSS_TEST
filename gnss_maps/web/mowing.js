@@ -21,10 +21,10 @@ const Mowing = (() => {
    return {...p,heading,reverse,tracking:{heading,reverse,anchor,segment}};
   });
  }
- function blade(p,heading){const h=heading*rad,forward=[Math.sin(h),Math.cos(h)],right=[Math.cos(h),-Math.sin(h)];return {
-  center:offset(p,.30*forward[0],.30*forward[1]),
-  left:offset(p,.30*forward[0]-.25*right[0],.30*forward[1]-.25*right[1]),
-  right:offset(p,.30*forward[0]+.25*right[0],.30*forward[1]+.25*right[1])};}
+ function blade(p,heading,front=.30,side=0){const h=heading*rad,forward=[Math.sin(h),Math.cos(h)],right=[Math.cos(h),-Math.sin(h)];return {
+  center:offset(p,front*forward[0]+side*right[0],front*forward[1]+side*right[1]),
+  left:offset(p,front*forward[0]+side*right[0]-.25*right[0],front*forward[1]+side*right[1]-.25*right[1]),
+  right:offset(p,front*forward[0]+side*right[0]+.25*right[0],front*forward[1]+side*right[1]+.25*right[1])};}
  // Sweep a radius-25 cm disk along each pair of corrected blade centres.
  // All rings have the same winding so retraced paths do not cancel their fill.
  function capsule(a,b){
@@ -38,10 +38,10 @@ const Mowing = (() => {
   }
   return ring;
  }
- function strips(points,heading){
+ function strips(points,heading,front=.30,side=0){
   return points.map((p,i)=>{
-   const c=blade(p,p.heading??heading).center,b={lat:c[0],lon:c[1]};
-   const previous=i&&points[i-1].segment===p.segment?blade(points[i-1],points[i-1].heading??heading).center:c;
+   const c=blade(p,p.heading??heading,front,side).center,b={lat:c[0],lon:c[1]};
+   const previous=i&&points[i-1].segment===p.segment?blade(points[i-1],points[i-1].heading??heading,front,side).center:c;
    return {quality:p.quality,ring:capsule({lat:previous[0],lon:previous[1]},b)};
   });
  }

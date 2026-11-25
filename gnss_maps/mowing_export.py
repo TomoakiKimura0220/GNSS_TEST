@@ -6,7 +6,9 @@ from shapely.ops import unary_union
 from shapely.geometry.polygon import orient
 
 
-def merged_kml(points, heading, title):
+def merged_kml(points, heading, title, front=.3, side=0):
+    if not all(math.isfinite(v) and abs(v) <= 10 for v in (front, side)):
+        raise ValueError("位置補正は前後・左右とも−10〜10 mで指定してください")
     if not points or not math.isfinite(heading):
         raise ValueError('測位点と有効な固定方位が必要です')
     lat, lon = points[0]['lat'], points[0]['lon']
@@ -17,7 +19,8 @@ def merged_kml(points, heading, title):
     groups = []
     for p in points:
         h = p.get("heading", heading)
-        dx, dy = .3 * math.sin(h * rad), .3 * math.cos(h * rad)
+        dx = front * math.sin(h * rad) + side * math.cos(h * rad)
+        dy = front * math.cos(h * rad) - side * math.sin(h * rad)
         if not groups or groups[-1][0] != p['segment']:
             groups.append((p['segment'], []))
         groups[-1][1].append(((p['lon']-lon)*east+dx, (p['lat']-lat)*north+dy))
@@ -27,7 +30,7 @@ def merged_kml(points, heading, title):
     root = ET.Element('kml', xmlns='http://www.opengis.net/kml/2.2')
     doc = ET.SubElement(root, 'Document')
     ET.SubElement(doc, 'name').text = title + ' 草刈り推定範囲'
-    ET.SubElement(doc, 'description').text = f'直径50cm、前方30cm補正、北向き前進開始・時系列方位推定。重複を統合。品質別の色は統合して緑色。'
+    ET.SubElement(doc, 'description').text = f'直径50cm、受信機から刃中心へ前方{front:g}m・右方{side:g}m補正、北向き前進開始・時系列方位推定。重複を統合。品質別の色は統合して緑色。'
     style = ET.SubElement(doc, 'Style', id='mowing')
     poly_style = ET.SubElement(style, 'PolyStyle')
     ET.SubElement(poly_style, 'color').text = 'ff699605'

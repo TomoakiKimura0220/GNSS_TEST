@@ -25,3 +25,22 @@ class MowingExportTests(unittest.TestCase):
     def test_invalid(self):
         with self.assertRaises(ValueError):merged_kml([],0,'Empty')
         with self.assertRaises(ValueError):merged_kml([self.point(0,0)],float('nan'),'NaN')
+
+class OffsetTests(unittest.TestCase):
+    def test_invalid_offsets(self):
+        for value in [float('nan'),float('inf'),11,-11]:
+            with self.assertRaises(ValueError):
+                merged_kml([{'lat':35,'lon':137,'segment':1}],0,'test',value,0)
+    def test_offset_rotates_with_heading(self):
+        import xml.etree.ElementTree as ET
+        def centre(heading,front,side):
+            result=merged_kml([{'lat':35,'lon':137,'segment':1,'heading':heading}],0,'test',front,side)
+            node=ET.fromstring(result['kml'])
+            coords=node.find('.//{*}coordinates').text.split()
+            xy=[tuple(map(float,c.split(',')[:2])) for c in coords]
+            return ((min(p[0] for p in xy)+max(p[0] for p in xy))/2,(min(p[1] for p in xy)+max(p[1] for p in xy))/2)
+        a=centre(0,.4,.2);b=centre(90,.4,.2)
+        self.assertGreater(a[0],137);self.assertGreater(a[1],35)
+        self.assertGreater(b[0],137);self.assertLess(b[1],35)
+        c=centre(0,0,0)
+        self.assertAlmostEqual(c[0],137,8);self.assertAlmostEqual(c[1],35,8)
